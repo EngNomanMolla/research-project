@@ -181,6 +181,7 @@ class _ResultScreenState extends State<ResultScreen> {
                       height: 1.3,
                     ),
                   ),
+                
                   const Divider(height: 25, color: Colors.white24),
                   Text(
                     widget.result.descriptionBn,
