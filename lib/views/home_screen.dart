@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import 'saved_records_screen.dart';
 import 'triage_wizard_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -20,6 +21,18 @@ class HomeScreen extends StatelessWidget {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.qr_code_2, color: Colors.white, size: 26),
+            tooltip: 'সংরক্ষিত কিউআর কোড',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SavedRecordsScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
@@ -117,7 +130,7 @@ class HomeScreen extends StatelessWidget {
                 );
               },
               child: Container(
-                height: 180,
+                height: 170,
                 decoration: BoxDecoration(
                   color: AppTheme.primaryColor,
                   borderRadius: AppTheme.borderRadius,
@@ -152,12 +165,12 @@ class HomeScreen extends StatelessWidget {
                             color: Colors.white,
                             size: 40,
                           ),
-                          SizedBox(height: 16),
+                          SizedBox(height: 14),
                           Text(
                             'লক্ষণ যাচাই করুন (শুরু করুন)',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 22,
+                              fontSize: 21,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -166,7 +179,7 @@ class HomeScreen extends StatelessWidget {
                             'মুখে বলুন বা লিখে আপনার রোগের কথা জানান',
                             style: TextStyle(
                               color: Colors.white70,
-                              fontSize: 14,
+                              fontSize: 13,
                             ),
                           ),
                         ],
@@ -179,14 +192,74 @@ class HomeScreen extends StatelessWidget {
                       child: Icon(
                         Icons.arrow_circle_right_rounded,
                         color: Colors.white,
-                        size: 48,
+                        size: 44,
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 16),
+
+            // Saved QR Codes & History Quick Access Card
+            Card(
+              elevation: 1,
+              color: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: AppTheme.borderRadius,
+                side: BorderSide(color: AppTheme.secondaryColor.withOpacity(0.4), width: 1.2),
+              ),
+              child: InkWell(
+                borderRadius: AppTheme.borderRadius,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const SavedRecordsScreen()),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.secondaryColor.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.qr_code_scanner_rounded, color: AppTheme.secondaryColor, size: 28),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'সংরক্ষিত কিউআর ও মেডিকেল হিস্ট্রি',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: AppTheme.textDark,
+                              ),
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              'ডাক্তারকে দেখানোর জন্য আগের কিউআর কোডগুলো দেখুন',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textLight,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.textLight),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 25),
 
             // Emergency Helplines Section Title
             const Text(

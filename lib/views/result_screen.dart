@@ -1,8 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../theme/app_theme.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import '../models/patient_record.dart';
+import '../services/records_db_service.dart';
 import '../services/triage_service.dart';
+import '../theme/app_theme.dart';
+import 'saved_records_screen.dart';
 
 class ResultScreen extends StatefulWidget {
   final TriageResult result;
@@ -37,34 +42,123 @@ class _ResultScreenState extends State<ResultScreen> {
   int _highlightedWordIndex = -1;
   Timer? _audioTimer;
   List<String> _audioWords = [];
+  late PatientRecord _patientRecord;
+  final FlutterTts _flutterTts = FlutterTts();
 
   @override
   void initState() {
     super.initState();
     // Prepare words for simulated TTS word-by-word highlighting
     _audioWords = widget.result.audioScriptBn.split(' ');
+
+    // Construct PatientRecord model
+    _patientRecord = PatientRecord(
+      id: 'REC-${DateTime.now().millisecondsSinceEpoch}',
+      patientName: widget.patientName,
+      age: widget.age,
+      gender: widget.gender,
+      weight: widget.weight,
+      hasDiabetes: widget.hasDiabetes,
+      hasHighBP: widget.hasHighBP,
+      isSmoker: widget.isSmoker,
+      symptoms: widget.symptoms,
+      urgency: _getUrgencyKey(widget.result.urgency),
+      careLevelBn: widget.result.careLevelBn,
+      careLevelEn: widget.result.careLevelEn,
+      adviceBn: widget.result.adviceBn,
+      firstAidBn: widget.result.firstAidBn,
+      createdAt: DateTime.now(),
+    );
+
+    // Save record to local database automatically
+    _saveRecordToLocalDb();
+
+    // Initialize Text to speech
+    _initTts();
+  }
+
+  Future<void> _initTts() async {
+    try {
+      // Configure Bengali voice
+      await _flutterTts.setLanguage('bn-BD');
+      await _flutterTts.setSpeechRate(0.45); // comfortable rate
+      await _flutterTts.setVolume(1.0);
+      await _flutterTts.setPitch(1.0);
+
+      _flutterTts.setCompletionHandler(() {
+        if (!mounted) return;
+        setState(() {
+          _isPlayingAudio = false;
+          _highlightedWordIndex = -1;
+        });
+        _audioTimer?.cancel();
+      });
+
+      _flutterTts.setCancelHandler(() {
+        if (!mounted) return;
+        setState(() {
+          _isPlayingAudio = false;
+          _highlightedWordIndex = -1;
+        });
+        _audioTimer?.cancel();
+      });
+
+      _flutterTts.setErrorHandler((msg) {
+        debugPrint('TTS Error: $msg');
+        if (!mounted) return;
+        setState(() {
+          _isPlayingAudio = false;
+          _highlightedWordIndex = -1;
+        });
+        _audioTimer?.cancel();
+      });
+    } catch (e) {
+      debugPrint('TTS Init Error: $e');
+    }
+  }
+
+  Future<void> _saveRecordToLocalDb() async {
+    await RecordsDbService.saveRecord(_patientRecord);
+  }
+
+  String _getUrgencyKey(UrgencyLevel urgency) {
+    switch (urgency) {
+      case UrgencyLevel.emergency:
+        return 'emergency';
+      case UrgencyLevel.high:
+        return 'high';
+      case UrgencyLevel.medium:
+        return 'medium';
+      case UrgencyLevel.low:
+        return 'low';
+    }
   }
 
   @override
   void dispose() {
+    _flutterTts.stop();
     _audioTimer?.cancel();
     super.dispose();
   }
 
-  void _toggleAudioPlayback() {
+  Future<void> _toggleAudioPlayback() async {
     if (_isPlayingAudio) {
+      await _flutterTts.stop();
       _audioTimer?.cancel();
-      setState(() {
-        _isPlayingAudio = false;
-        _highlightedWordIndex = -1;
-      });
+      if (mounted) {
+        setState(() {
+          _isPlayingAudio = false;
+          _highlightedWordIndex = -1;
+        });
+      }
     } else {
       setState(() {
         _isPlayingAudio = true;
         _highlightedWordIndex = 0;
       });
 
-      // Highlight next words slowly to simulate speaking cadence
+      // Synchronize visual highlighting
+      _audioTimer?.cancel();
       _audioTimer = Timer.periodic(const Duration(milliseconds: 380), (timer) {
         if (!mounted) return;
         setState(() {
@@ -72,12 +166,76 @@ class _ResultScreenState extends State<ResultScreen> {
             _highlightedWordIndex++;
           } else {
             _audioTimer?.cancel();
-            _isPlayingAudio = false;
-            _highlightedWordIndex = -1;
           }
         });
       });
+
+      // Speak aloud in Bengali
+      try {
+        final res = await _flutterTts.speak(widget.result.audioScriptBn);
+        debugPrint('TTS Speak result: $res');
+      } catch (e) {
+        debugPrint('TTS Speak exception: $e');
+      }
     }
+  }
+
+  void _showFullscreenQr() {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'ডাক্তারকে স্ক্যান করতে দিন',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: AppTheme.primaryColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'রোগী: ${_patientRecord.patientName.isEmpty ? "অজ্ঞাত" : _patientRecord.patientName} (${_patientRecord.age} বছর)',
+                style: const TextStyle(fontSize: 12, color: AppTheme.textLight),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200, width: 2),
+                ),
+                child: QrImageView(
+                  data: _patientRecord.toQrPayload(),
+                  version: QrVersions.auto,
+                  size: 240.0,
+                  gapless: false,
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: AppTheme.primaryColor,
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: Color(0xFF1D3557),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('বন্ধ করুন'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -93,6 +251,18 @@ class _ResultScreenState extends State<ResultScreen> {
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history, color: Colors.white),
+            tooltip: 'সংরক্ষিত হিস্ট্রি',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SavedRecordsScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -101,7 +271,7 @@ class _ResultScreenState extends State<ResultScreen> {
           children: [
             // Patient details card
             Text(
-              'রোগী: ${widget.patientName} এর জন্য পরামর্শ',
+              'রোগী: ${widget.patientName.isEmpty ? "অজ্ঞাত" : widget.patientName} এর জন্য পরামর্শ',
               style: const TextStyle(fontSize: 14, color: AppTheme.textLight, fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 8),
@@ -196,7 +366,146 @@ class _ResultScreenState extends State<ResultScreen> {
             ),
             const SizedBox(height: 20),
 
-            // 2. TTS Voice Instruction Box (Low-literacy focus)
+            // 2. Smart QR Code Card (Saved automatically to local storage)
+            Card(
+              elevation: 2,
+              color: Colors.white,
+              shape: RoundedRectangleBorder(
+                side: const BorderSide(color: AppTheme.primaryColor, width: 1.5),
+                borderRadius: AppTheme.borderRadius,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.qr_code_2_rounded, color: AppTheme.primaryColor, size: 24),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'ডাক্তারের জন্য স্মার্ট কিউআর কোড',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                  color: AppTheme.primaryColor,
+                                ),
+                              ),
+                              Text(
+                                'ডাটাবেজে সংরক্ষিত | স্ক্যান করে তথ্য দেখা যাবে',
+                                style: TextStyle(fontSize: 11, color: AppTheme.successColor, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 20),
+                    const Text(
+                      'হাসপাতালে গিয়ে ডাক্তারকে এই কিউআর কোডটি স্ক্যান করতে বলুন। ডাক্তার আপনার বয়স, ডায়াবেটিস হিস্ট্রি ও উপসর্গের সব তথ্য এক ক্লিকেই পেয়ে যাবেন।',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textDark, height: 1.4),
+                    ),
+                    const SizedBox(height: 16),
+                    Center(
+                      child: GestureDetector(
+                        onTap: _showFullscreenQr,
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey.shade300, width: 1.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.04),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              )
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              QrImageView(
+                                data: _patientRecord.toQrPayload(),
+                                version: QrVersions.auto,
+                                size: 160.0,
+                                gapless: false,
+                                eyeStyle: const QrEyeStyle(
+                                  eyeShape: QrEyeShape.square,
+                                  color: AppTheme.primaryColor,
+                                ),
+                                dataModuleStyle: const QrDataModuleStyle(
+                                  dataModuleShape: QrDataModuleShape.square,
+                                  color: Color(0xFF1D3557),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.zoom_in, size: 14, color: AppTheme.textLight),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'বড় করে দেখতে স্পর্শ করুন',
+                                    style: TextStyle(fontSize: 10, color: AppTheme.textLight),
+                                  ),
+                                ],
+                              )
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _showFullscreenQr,
+                            icon: const Icon(Icons.fullscreen, size: 18),
+                            label: const Text('বড় কিউআর', style: TextStyle(fontSize: 12)),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const SavedRecordsScreen()),
+                              );
+                            },
+                            icon: const Icon(Icons.folder_shared_outlined, size: 18),
+                            label: const Text('সংরক্ষিত হিস্ট্রি', style: TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              backgroundColor: AppTheme.secondaryColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 3. TTS Voice Instruction Box (Low-literacy focus)
             Card(
               elevation: 0,
               shape: RoundedRectangleBorder(
@@ -280,7 +589,7 @@ class _ResultScreenState extends State<ResultScreen> {
             ),
             const SizedBox(height: 20),
 
-            // 3. Kobiraj Warning Box
+            // 4. Kobiraj Warning Box
             Card(
               elevation: 0,
               color: Colors.white,
@@ -322,7 +631,7 @@ class _ResultScreenState extends State<ResultScreen> {
             ),
             const SizedBox(height: 20),
 
-            // 4. First Aid Tips
+            // 5. First Aid Tips
             Card(
               elevation: 0,
               color: Colors.white,
