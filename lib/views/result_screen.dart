@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../models/consultation_model.dart';
 import '../models/patient_record.dart';
 import '../services/records_db_service.dart';
 import '../services/triage_service.dart';
@@ -11,25 +14,49 @@ import 'saved_records_screen.dart';
 
 class ResultScreen extends StatefulWidget {
   final TriageResult result;
+  final ConsultationResponse? consultation;
   final String patientName;
   final String symptoms;
   final int age;
   final double? weight;
+  final int durationDays;
   final bool hasDiabetes;
   final bool hasHighBP;
+  final bool hasHeartDisease;
+  final bool hasAsthma;
+  final bool hasKidneyDisease;
+  final bool hasCancer;
+  final bool hasStroke;
+  final bool hasAllergy;
+  final bool hasLiverCirrhosis;
+  final bool hasTb;
+  final bool hasThyroidProblem;
   final bool isSmoker;
+  final bool isAlcoholic;
   final String gender;
 
   const ResultScreen({
     super.key,
     required this.result,
+    this.consultation,
     required this.patientName,
     required this.symptoms,
     required this.age,
     required this.weight,
+    this.durationDays = 2,
     required this.hasDiabetes,
     required this.hasHighBP,
+    this.hasHeartDisease = false,
+    this.hasAsthma = false,
+    this.hasKidneyDisease = false,
+    this.hasCancer = false,
+    this.hasStroke = false,
+    this.hasAllergy = false,
+    this.hasLiverCirrhosis = false,
+    this.hasTb = false,
+    this.hasThyroidProblem = false,
     required this.isSmoker,
+    this.isAlcoholic = false,
     required this.gender,
   });
 
@@ -45,28 +72,97 @@ class _ResultScreenState extends State<ResultScreen> {
   late PatientRecord _patientRecord;
   final FlutterTts _flutterTts = FlutterTts();
 
+  String get _speakableText {
+    if (widget.consultation != null && widget.consultation!.triageResult.aiSummary.isNotEmpty) {
+      return widget.consultation!.triageResult.aiSummary;
+    }
+    return widget.result.audioScriptBn;
+  }
+
+  Color get _themeColor {
+    if (widget.consultation != null) {
+      final level = widget.consultation!.triageResult.riskLevel.toLowerCase();
+      if (level == 'emergency') return const Color(0xFFE63946);
+      if (level == 'high') return const Color(0xFFE29578);
+      if (level == 'medium') return const Color(0xFFF4A261);
+      return const Color(0xFF2A9D8F);
+    }
+    return widget.result.color;
+  }
+
+  String get _urgencyTextBn {
+    if (widget.consultation != null) {
+      return widget.consultation!.triageResult.riskLevelBn;
+    }
+    switch (widget.result.urgency) {
+      case UrgencyLevel.emergency:
+        return 'জরুরি অবস্থা (Emergency)';
+      case UrgencyLevel.high:
+        return 'উচ্চ ঝুঁকি (High Risk)';
+      case UrgencyLevel.medium:
+        return 'মাঝারি লক্ষণ (Moderate Symptoms)';
+      case UrgencyLevel.low:
+        return 'সাধারণ লক্ষণ (Low Risk)';
+    }
+  }
+
+  String get _careFacilityBn {
+    if (widget.consultation != null && widget.consultation!.triageResult.recommendedFacilityBn.isNotEmpty) {
+      return widget.consultation!.triageResult.recommendedFacilityBn;
+    }
+    return widget.result.careLevelBn;
+  }
+
+  String? get _specialistBn {
+    if (widget.consultation != null && widget.consultation!.triageResult.recommendedSpecialist.isNotEmpty) {
+      return widget.consultation!.triageResult.recommendedSpecialist;
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
     // Prepare words for simulated TTS word-by-word highlighting
-    _audioWords = widget.result.audioScriptBn.split(' ');
+    _audioWords = _speakableText.split(' ').where((w) => w.trim().isNotEmpty).toList();
 
     // Construct PatientRecord model
+    final tracking = widget.consultation?.trackingCode;
     _patientRecord = PatientRecord(
-      id: 'REC-${DateTime.now().millisecondsSinceEpoch}',
+      id: tracking ?? 'REC-${DateTime.now().millisecondsSinceEpoch}',
+      trackingCode: tracking,
       patientName: widget.patientName,
       age: widget.age,
       gender: widget.gender,
       weight: widget.weight,
+      durationDays: widget.durationDays,
       hasDiabetes: widget.hasDiabetes,
       hasHighBP: widget.hasHighBP,
+      hasHeartDisease: widget.hasHeartDisease,
+      hasAsthma: widget.hasAsthma,
+      hasKidneyDisease: widget.hasKidneyDisease,
+      hasCancer: widget.hasCancer,
+      hasStroke: widget.hasStroke,
+      hasAllergy: widget.hasAllergy,
+      hasLiverCirrhosis: widget.hasLiverCirrhosis,
+      hasTb: widget.hasTb,
+      hasThyroidProblem: widget.hasThyroidProblem,
       isSmoker: widget.isSmoker,
+      isAlcoholic: widget.isAlcoholic,
       symptoms: widget.symptoms,
-      urgency: _getUrgencyKey(widget.result.urgency),
-      careLevelBn: widget.result.careLevelBn,
-      careLevelEn: widget.result.careLevelEn,
-      adviceBn: widget.result.adviceBn,
-      firstAidBn: widget.result.firstAidBn,
+      urgency: widget.consultation?.triageResult.riskLevel ?? _getUrgencyKey(widget.result.urgency),
+      careLevelBn: _careFacilityBn,
+      careLevelEn: widget.consultation?.triageResult.recommendedFacility ?? widget.result.careLevelEn,
+      recommendedSpecialist: _specialistBn,
+      aiSummary: widget.consultation?.triageResult.aiSummary,
+      adviceBn: widget.consultation != null && widget.consultation!.triageResult.primaryAdvice.isNotEmpty
+          ? widget.consultation!.triageResult.primaryAdvice.join('\n• ')
+          : widget.result.adviceBn,
+      firstAidBn: widget.consultation != null && widget.consultation!.triageResult.warningSigns.isNotEmpty
+          ? widget.consultation!.triageResult.warningSigns.join('\n• ')
+          : widget.result.firstAidBn,
+      verificationUrl: widget.consultation?.qr.verificationUrl,
+      consultationJson: widget.consultation != null ? jsonEncode(widget.consultation!.rawJson) : null,
       createdAt: DateTime.now(),
     );
 
@@ -79,9 +175,8 @@ class _ResultScreenState extends State<ResultScreen> {
 
   Future<void> _initTts() async {
     try {
-      // Configure Bengali voice
       await _flutterTts.setLanguage('bn-BD');
-      await _flutterTts.setSpeechRate(0.45); // comfortable rate
+      await _flutterTts.setSpeechRate(0.45);
       await _flutterTts.setVolume(1.0);
       await _flutterTts.setPitch(1.0);
 
@@ -157,7 +252,6 @@ class _ResultScreenState extends State<ResultScreen> {
         _highlightedWordIndex = 0;
       });
 
-      // Synchronize visual highlighting
       _audioTimer?.cancel();
       _audioTimer = Timer.periodic(const Duration(milliseconds: 380), (timer) {
         if (!mounted) return;
@@ -170,10 +264,8 @@ class _ResultScreenState extends State<ResultScreen> {
         });
       });
 
-      // Speak aloud in Bengali
       try {
-        final res = await _flutterTts.speak(widget.result.audioScriptBn);
-        debugPrint('TTS Speak result: $res');
+        await _flutterTts.speak(_speakableText);
       } catch (e) {
         debugPrint('TTS Speak exception: $e');
       }
@@ -198,6 +290,19 @@ class _ResultScreenState extends State<ResultScreen> {
                   color: AppTheme.primaryColor,
                 ),
               ),
+              const SizedBox(height: 6),
+              if (_patientRecord.trackingCode != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'ট্র্যাকিং কোড: ${_patientRecord.trackingCode}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryColor),
+                  ),
+                ),
               const SizedBox(height: 8),
               Text(
                 'রোগী: ${_patientRecord.patientName.isEmpty ? "অজ্ঞাত" : _patientRecord.patientName} (${_patientRecord.age} বছর)',
@@ -238,11 +343,25 @@ class _ResultScreenState extends State<ResultScreen> {
     );
   }
 
+  void _copyTrackingCode() {
+    final code = widget.consultation?.trackingCode;
+    if (code != null && code.isNotEmpty) {
+      Clipboard.setData(ClipboardData(text: code));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('ট্র্যাকিং কোড "$code" ক্লিপবোর্ডে কপি করা হয়েছে!'),
+          backgroundColor: AppTheme.successColor,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Dynamic text color based on risk levels for maximum contrast
-    final isEmergency = widget.result.urgency == UrgencyLevel.emergency || widget.result.urgency == UrgencyLevel.high;
-    final textColor = isEmergency ? Colors.white : AppTheme.textDark;
+    final color = _themeColor;
+    final isDarkBadge = color == const Color(0xFFE63946) || color == const Color(0xFFE29578);
+    final headerTextColor = isDarkBadge ? Colors.white : AppTheme.textDark;
 
     return Scaffold(
       appBar: AppBar(
@@ -269,9 +388,58 @@ class _ResultScreenState extends State<ResultScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Patient details card
+            // Tracking Code Banner (if available)
+            if (widget.consultation != null && widget.consultation!.trackingCode.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryColor.withOpacity(0.08),
+                      AppTheme.secondaryColor.withOpacity(0.12),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.primaryColor.withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.verified_outlined, color: AppTheme.primaryColor, size: 24),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'ডিজিটাল ট্রায়াজ ট্র্যাকিং কোড',
+                            style: TextStyle(fontSize: 11, color: AppTheme.textLight, fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            widget.consultation!.trackingCode,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primaryColor,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy, size: 20, color: AppTheme.primaryColor),
+                      tooltip: 'কপি করুন',
+                      onPressed: _copyTrackingCode,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Patient details bar
             Text(
-              'রোগী: ${widget.patientName.isEmpty ? "অজ্ঞাত" : widget.patientName} এর জন্য পরামর্শ',
+              'রোগী: ${widget.patientName.isEmpty ? "অজ্ঞাত" : widget.patientName} এর জন্য এআই ট্রায়াজ মূল্যায়ন',
               style: const TextStyle(fontSize: 14, color: AppTheme.textLight, fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 8),
@@ -282,34 +450,55 @@ class _ResultScreenState extends State<ResultScreen> {
                 _buildDetailChip('বয়স: ${widget.age} বছর', Icons.calendar_today),
                 if (widget.weight != null)
                   _buildDetailChip('ওজন: ${widget.weight} কেজি', Icons.monitor_weight),
+                _buildDetailChip('স্থায়িত্ব: ${widget.durationDays} দিন', Icons.timer_outlined),
                 _buildDetailChip(
-                  widget.gender == 'male' 
-                      ? 'লিঙ্গ: পুরুষ' 
-                      : widget.gender == 'female' 
-                          ? 'লিঙ্গ: নারী' 
-                          : 'লিঙ্গ: গর্ভবতী মা',
+                  widget.gender == 'male'
+                      ? 'পুরুষ'
+                      : widget.gender == 'female'
+                          ? 'নারী'
+                          : 'গর্ভবতী মা',
                   Icons.person,
                 ),
-                if (widget.isSmoker)
-                  _buildDetailChip('ধূমপায়ী', Icons.smoking_rooms, color: AppTheme.warningColor),
                 if (widget.hasDiabetes)
                   _buildDetailChip('ডায়াবেটিস', Icons.bloodtype, color: AppTheme.dangerColor),
                 if (widget.hasHighBP)
                   _buildDetailChip('উচ্চ রক্তচাপ', Icons.favorite, color: AppTheme.dangerColor),
+                if (widget.hasHeartDisease)
+                  _buildDetailChip('হৃদরোগ', Icons.monitor_heart, color: AppTheme.dangerColor),
+                if (widget.hasAsthma)
+                  _buildDetailChip('হাঁপানি/অ্যাজমা', Icons.air, color: AppTheme.warningColor),
+                if (widget.hasKidneyDisease)
+                  _buildDetailChip('কিডনি রোগ', Icons.water_drop, color: AppTheme.warningColor),
+                if (widget.hasStroke)
+                  _buildDetailChip('স্ট্রোক', Icons.psychology, color: AppTheme.dangerColor),
+                if (widget.hasCancer)
+                  _buildDetailChip('ক্যান্সার', Icons.medical_services, color: AppTheme.dangerColor),
+                if (widget.hasAllergy)
+                  _buildDetailChip('অ্যালার্জি', Icons.coronavirus, color: AppTheme.warningColor),
+                if (widget.hasThyroidProblem)
+                  _buildDetailChip('থাইরয়েড', Icons.healing, color: AppTheme.warningColor),
+                if (widget.hasLiverCirrhosis)
+                  _buildDetailChip('লিভার সিরোসিস', Icons.local_hospital, color: AppTheme.dangerColor),
+                if (widget.hasTb)
+                  _buildDetailChip('যক্ষ্মা (TB)', Icons.sick, color: AppTheme.dangerColor),
+                if (widget.isSmoker)
+                  _buildDetailChip('ধূমপায়ী', Icons.smoking_rooms, color: AppTheme.warningColor),
+                if (widget.isAlcoholic)
+                  _buildDetailChip('মদ্যপান', Icons.local_bar, color: AppTheme.warningColor),
               ],
             ),
-            const SizedBox(height: 15),
+            const SizedBox(height: 16),
 
-            // 1. Referral Location Card (Primary Output)
+            // 1. Primary Recommendation Card (Facility & Specialist)
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: widget.result.color,
+                color: color,
                 borderRadius: AppTheme.borderRadius,
                 boxShadow: [
                   BoxShadow(
-                    color: widget.result.color.withOpacity(0.3),
-                    blurRadius: 10,
+                    color: color.withOpacity(0.35),
+                    blurRadius: 12,
                     offset: const Offset(0, 6),
                   )
                 ],
@@ -319,54 +508,400 @@ class _ResultScreenState extends State<ResultScreen> {
                 children: [
                   // Urgency badge
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withOpacity(0.22),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text(
-                      _getUrgencyTextBn(widget.result.urgency),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: textColor,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          size: 16,
+                          color: headerTextColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _urgencyTextBn,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: headerTextColor,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 15),
-                  const Text(
+                  const SizedBox(height: 16),
+                  Text(
                     'আপনার যাওয়া উচিত:',
                     style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.white70,
+                      fontSize: 13,
+                      color: headerTextColor.withOpacity(0.85),
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    widget.result.careLevelBn,
+                    _careFacilityBn,
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: textColor,
+                      color: headerTextColor,
                       height: 1.3,
                     ),
                   ),
-                
-                  const Divider(height: 25, color: Colors.white24),
-                  Text(
-                    widget.result.descriptionBn,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isEmergency ? Colors.white.withOpacity(0.9) : AppTheme.textDark.withOpacity(0.9),
-                      height: 1.5,
+                  if (_specialistBn != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.person_pin, color: headerTextColor, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'প্রস্তাবিত বিশেষজ্ঞ: $_specialistBn',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: headerTextColor,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
+                  if (widget.consultation == null) ...[
+                    const Divider(height: 25, color: Colors.white24),
+                    Text(
+                      widget.result.descriptionBn,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: headerTextColor.withOpacity(0.92),
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
             const SizedBox(height: 20),
 
-            // 2. Smart QR Code Card (Saved automatically to local storage)
+            // 2. AI Assessment & Voice Audio Guidance
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                side: BorderSide(color: AppTheme.primaryColor.withOpacity(0.2), width: 1.5),
+                borderRadius: AppTheme.borderRadius,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+                          radius: 20,
+                          child: IconButton(
+                            icon: Icon(
+                              _isPlayingAudio ? Icons.pause : Icons.volume_up,
+                              color: AppTheme.primaryColor,
+                              size: 20,
+                            ),
+                            onPressed: _toggleAudioPlayback,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'এআই মূল্যায়ন ও অডিও পরামর্শ',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                  color: AppTheme.primaryColor,
+                                ),
+                              ),
+                              Text(
+                                'শুনতে স্পিকার বাটনে চাপুন (বাংলা ভয়েস গাইড)',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.textLight,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (_isPlayingAudio)
+                          const SizedBox(
+                            width: 32,
+                            child: LinearProgressIndicator(
+                              minHeight: 2,
+                              color: AppTheme.primaryColor,
+                            ),
+                          )
+                      ],
+                    ),
+                    const Divider(height: 20),
+                    RichText(
+                      text: TextSpan(
+                        children: List.generate(_audioWords.length, (index) {
+                          final isHighlighted = index == _highlightedWordIndex;
+                          return TextSpan(
+                            text: '${_audioWords[index]} ',
+                            style: GoogleFonts.hindSiliguri(
+                              fontSize: 14,
+                              height: 1.5,
+                              color: isHighlighted ? AppTheme.primaryColor : AppTheme.textDark,
+                              fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal,
+                              backgroundColor: isHighlighted
+                                  ? AppTheme.secondaryColor.withOpacity(0.3)
+                                  : Colors.transparent,
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 3. Possible Conditions & Diseases (from AI API)
+            if (widget.consultation != null &&
+                widget.consultation!.triageResult.possibleConditions.isNotEmpty) ...[
+              Card(
+                elevation: 0,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  side: BorderSide(color: Colors.grey.shade200),
+                  borderRadius: AppTheme.borderRadius,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.biotech_outlined, color: AppTheme.primaryColor, size: 22),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'সম্ভাব্য রোগ ও জটিলতা (Possible Conditions)',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: AppTheme.primaryColor,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      ...widget.consultation!.triageResult.possibleConditions.map((cond) {
+                        final isHighProb = cond.probability.contains('উচ্চ') || cond.probability.toLowerCase().contains('high');
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: isHighProb ? Colors.red.shade50.withOpacity(0.5) : AppTheme.accentColor.withOpacity(0.3),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isHighProb ? Colors.red.shade200 : AppTheme.primaryColor.withOpacity(0.2),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      cond.condition,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppTheme.textDark,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: isHighProb ? AppTheme.dangerColor : AppTheme.warningColor,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      cond.probability,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (cond.description.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  cond.description,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textLight,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+
+            // 4. Primary Medical Advice
+            Card(
+              elevation: 0,
+              color: Colors.white,
+              shape: RoundedRectangleBorder(
+                side: BorderSide(color: Colors.grey.shade200),
+                borderRadius: AppTheme.borderRadius,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.medical_services_outlined, color: AppTheme.primaryColor, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'জরুরি প্রাথমিক করণীয় ও পরামর্শ',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: AppTheme.primaryColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 20),
+                    if (widget.consultation != null && widget.consultation!.triageResult.primaryAdvice.isNotEmpty) ...[
+                      ...widget.consultation!.triageResult.primaryAdvice.map((advice) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.check_circle_outline, size: 18, color: AppTheme.successColor),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  advice,
+                                  style: const TextStyle(fontSize: 13, color: AppTheme.textDark, height: 1.4),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ] else ...[
+                      Text(
+                        widget.result.adviceBn,
+                        style: const TextStyle(fontSize: 13, color: AppTheme.textDark, height: 1.5),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 5. Warning Signs (বিপদ সংকেত)
+            Card(
+              elevation: 0,
+              color: Colors.white,
+              shape: RoundedRectangleBorder(
+                side: BorderSide(color: Colors.red.shade100, width: 1.2),
+                borderRadius: AppTheme.borderRadius,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.report_problem_outlined, color: AppTheme.dangerColor, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'বিপদ সংকেত (Warning Signs)',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: AppTheme.dangerColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 20),
+                    if (widget.consultation != null && widget.consultation!.triageResult.warningSigns.isNotEmpty) ...[
+                      ...widget.consultation!.triageResult.warningSigns.map((warning) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.warning, size: 16, color: AppTheme.dangerColor),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  warning,
+                                  style: const TextStyle(fontSize: 13, color: AppTheme.textDark, height: 1.4),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ] else ...[
+                      Text(
+                        widget.result.firstAidBn,
+                        style: const TextStyle(fontSize: 13, color: AppTheme.textDark, height: 1.5),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 6. Smart QR Code Card
             Card(
               elevation: 2,
               color: Colors.white,
@@ -404,7 +939,11 @@ class _ResultScreenState extends State<ResultScreen> {
                               ),
                               Text(
                                 'ডাটাবেজে সংরক্ষিত | স্ক্যান করে তথ্য দেখা যাবে',
-                                style: TextStyle(fontSize: 11, color: AppTheme.successColor, fontWeight: FontWeight.w600),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.successColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ],
                           ),
@@ -413,7 +952,7 @@ class _ResultScreenState extends State<ResultScreen> {
                     ),
                     const Divider(height: 20),
                     const Text(
-                      'হাসপাতালে গিয়ে ডাক্তারকে এই কিউআর কোডটি স্ক্যান করতে বলুন। ডাক্তার আপনার বয়স, ডায়াবেটিস হিস্ট্রি ও উপসর্গের সব তথ্য এক ক্লিকেই পেয়ে যাবেন।',
+                      'হাসপাতালে গিয়ে ডাক্তারকে এই কিউআর কোডটি স্ক্যান করতে বলুন। ডাক্তার আপনার বয়স, ডায়াবেটিস, উচ্চ রক্তচাপ, রোগের লক্ষণ ও এআই ট্রায়াজের সব তথ্য তাৎক্ষণিক পেয়ে যাবেন।',
                       style: TextStyle(fontSize: 12, color: AppTheme.textDark, height: 1.4),
                     ),
                     const SizedBox(height: 16),
@@ -503,180 +1042,11 @@ class _ResultScreenState extends State<ResultScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-
-            // 3. TTS Voice Instruction Box (Low-literacy focus)
-            Card(
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                side: BorderSide(color: AppTheme.primaryColor.withOpacity(0.2), width: 1.5),
-                borderRadius: AppTheme.borderRadius,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
-                          radius: 20,
-                          child: IconButton(
-                            icon: Icon(
-                              _isPlayingAudio ? Icons.pause : Icons.volume_up,
-                              color: AppTheme.primaryColor,
-                              size: 20,
-                            ),
-                            onPressed: _toggleAudioPlayback,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'প্রেসক্রিপশন অডিও শুনুন',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                  color: AppTheme.primaryColor,
-                                ),
-                              ),
-                              Text(
-                                'শুনতে স্পিকার বাটনে চাপুন (অডিও গাইড)',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: AppTheme.textLight,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (_isPlayingAudio)
-                          const SizedBox(
-                            width: 30,
-                            child: LinearProgressIndicator(
-                              minHeight: 2,
-                              color: AppTheme.primaryColor,
-                            ),
-                          )
-                      ],
-                    ),
-                    const Divider(height: 20),
-                 
-                    RichText(
-                      text: TextSpan(
-                        children: List.generate(_audioWords.length, (index) {
-                          final isHighlighted = index == _highlightedWordIndex;
-                          return TextSpan(
-                            text: '${_audioWords[index]} ',
-                            style: GoogleFonts.hindSiliguri(
-                              fontSize: 14,
-                              height: 1.5,
-                              color: isHighlighted ? AppTheme.primaryColor : AppTheme.textDark,
-                              fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal,
-                              backgroundColor: isHighlighted ? AppTheme.secondaryColor.withOpacity(0.3) : Colors.transparent,
-                            ),
-                          );
-                        }),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // 4. Kobiraj Warning Box
-            Card(
-              elevation: 0,
-              color: Colors.white,
-              shape: RoundedRectangleBorder(
-                side: BorderSide(color: Colors.grey.shade200),
-                borderRadius: AppTheme.borderRadius,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.gavel, color: AppTheme.dangerColor, size: 20),
-                        SizedBox(width: 8),
-                        Text(
-                          'সতর্কতা ও ভীতি দূরীকরণ',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: AppTheme.dangerColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Divider(height: 20),
-                    Text(
-                      widget.result.adviceBn,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.textDark,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // 5. First Aid Tips
-            Card(
-              elevation: 0,
-              color: Colors.white,
-              shape: RoundedRectangleBorder(
-                side: BorderSide(color: Colors.grey.shade200),
-                borderRadius: AppTheme.borderRadius,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.medical_services_outlined, color: AppTheme.successColor, size: 20),
-                        SizedBox(width: 8),
-                        Text(
-                          'তাত্ক্ষণিক করণীয় ও প্রাথমিক পরামর্শ',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: AppTheme.successColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Divider(height: 20),
-                    Text(
-                      widget.result.firstAidBn,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.textDark,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
             const SizedBox(height: 30),
 
             // Triage Action Buttons
             ElevatedButton.icon(
               onPressed: () {
-                // Return to home screen
                 Navigator.popUntil(context, (route) => route.isFirst);
               },
               icon: const Icon(Icons.home),
@@ -685,7 +1055,6 @@ class _ResultScreenState extends State<ResultScreen> {
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () {
-                // Restart triage wizard
                 Navigator.pop(context);
               },
               icon: const Icon(Icons.refresh),
@@ -699,19 +1068,6 @@ class _ResultScreenState extends State<ResultScreen> {
         ),
       ),
     );
-  }
-
-  String _getUrgencyTextBn(UrgencyLevel urgency) {
-    switch (urgency) {
-      case UrgencyLevel.emergency:
-        return 'জরুরি অবস্থা (Emergency)';
-      case UrgencyLevel.high:
-        return 'উচ্চ ঝুঁকি (High Risk)';
-      case UrgencyLevel.medium:
-        return 'মাঝারি লক্ষণ (Moderate Symptoms)';
-      case UrgencyLevel.low:
-        return 'সাধারণ লক্ষণ (Low Risk)';
-    }
   }
 
   Widget _buildDetailChip(String label, IconData icon, {Color? color}) {

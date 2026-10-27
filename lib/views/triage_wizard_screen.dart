@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart';
-import '../theme/app_theme.dart';
+import '../models/consultation_model.dart';
+import '../services/consultation_api_service.dart';
 import '../services/triage_service.dart';
+import '../theme/app_theme.dart';
 import 'result_screen.dart';
 
 class TriageWizardScreen extends StatefulWidget {
@@ -15,15 +17,31 @@ class TriageWizardScreen extends StatefulWidget {
 class _TriageWizardScreenState extends State<TriageWizardScreen> {
   int _currentStep = 0;
 
-  // Form Fields
+  // Form Fields - Basic
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _ageController = TextEditingController(text: '35');
   final TextEditingController _weightController = TextEditingController();
+  final TextEditingController _durationController = TextEditingController(text: '2');
   String _selectedGender = 'male'; // male, female, pregnant
-  bool _isSmoker = false;
+  int _durationDays = 2;
+
+  // Form Fields - Risk Factors & Medical History
   bool _hasDiabetes = false;
-  bool _hasHighBP = false;
+  bool _hasHypertension = false; // High BP
+  bool _hasHeartDisease = false;
+  bool _hasAsthma = false;
+  bool _hasKidneyDisease = false;
+  bool _hasCancer = false;
+  bool _hasStroke = false;
+  bool _hasAllergy = false;
+  bool _hasLiverCirrhosis = false;
+  bool _hasTb = false;
+  bool _hasThyroidProblem = false;
+  bool _isSmoker = false;
+  bool _isAlcoholic = false;
+
   final TextEditingController _symptomController = TextEditingController();
+  String _selectedPresetLabel = '';
 
   // Voice Recording State
   final SpeechToText _speechToText = SpeechToText();
@@ -68,7 +86,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
     }
   }
 
-  // Demo Symptom Presets
+  // Demo Symptom Presets (Kept identical as requested)
   final List<Map<String, String>> _presets = [
     {
       'label': 'বুকে প্রচণ্ড ব্যথা ও শ্বাসকষ্ট',
@@ -197,6 +215,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
     _nameController.dispose();
     _ageController.dispose();
     _weightController.dispose();
+    _durationController.dispose();
     _symptomController.dispose();
     _recordTimer?.cancel();
     _waveTimer?.cancel();
@@ -207,7 +226,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
     if (!_speechEnabled) {
       await _initSpeech();
     }
-    
+
     if (!_speechEnabled) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -224,6 +243,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
       _isRecording = true;
       _recordSeconds = 0;
       _symptomController.clear();
+      _selectedPresetLabel = '';
       _lastWords = '';
     });
 
@@ -266,9 +286,9 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
   void _stopListening() async {
     _recordTimer?.cancel();
     _waveTimer?.cancel();
-    
+
     await _speechToText.stop();
-    
+
     setState(() {
       _isRecording = false;
       _isAnalyzing = true;
@@ -292,8 +312,31 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
     });
   }
 
-  void _submitTriage() {
-    if (_symptomController.text.trim().isEmpty) {
+  List<String> _extractSymptomsList(String text) {
+    if (_selectedPresetLabel.isNotEmpty) {
+      final parts = _selectedPresetLabel
+          .split(RegExp(r'[,।\n]|(\s+ও\s+)|(\s+এবং\s+)'))
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (parts.isNotEmpty) return parts;
+    }
+
+    final raw = text
+        .split(RegExp(r'[,।\n]|(\s+ও\s+)|(\s+এবং\s+)'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty && s.length >= 2)
+        .toList();
+
+    if (raw.isNotEmpty) {
+      return raw.take(6).toList();
+    }
+    return [text.trim()];
+  }
+
+  Future<void> _submitTriage() async {
+    final symptomText = _symptomController.text.trim();
+    if (symptomText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('অনুগ্রহ করে আপনার রোগের বিবরণ দিন বা বলুন।'),
@@ -305,33 +348,273 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
 
     final ageValue = int.tryParse(_ageController.text) ?? 35;
     final weightValue = double.tryParse(_weightController.text);
+    final durationValue = int.tryParse(_durationController.text) ?? _durationDays;
+    final symptomsList = _extractSymptomsList(symptomText);
 
-    final result = TriageService.analyzeSymptoms(
-      _symptomController.text,
-      age: ageValue,
-      gender: _selectedGender,
-      isSmoker: _isSmoker,
-      weight: weightValue,
-      hasDiabetes: _hasDiabetes,
-      hasHighBP: _hasHighBP,
-    );
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ResultScreen(
-          result: result,
-          patientName: _nameController.text.trim(),
-          symptoms: _symptomController.text,
-          age: ageValue,
-          weight: weightValue,
-          hasDiabetes: _hasDiabetes,
-          hasHighBP: _hasHighBP,
-          isSmoker: _isSmoker,
-          gender: _selectedGender,
+    // Show stylish Loading Dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const CircularProgressIndicator(
+                    color: AppTheme.primaryColor,
+                    strokeWidth: 3.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'ডাঃ কাছে এআই ট্রায়াজ',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryColor,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'রোগীর বয়স, ডায়াবেটিস, উচ্চ রক্তচাপ ও লক্ষণসমূহ বিশ্লেষণ করা হচ্ছে...',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: AppTheme.textLight, height: 1.4),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentColor,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.cloud_sync, size: 16, color: AppTheme.primaryColor),
+                      SizedBox(width: 6),
+                      Text(
+                        'dev.learnwithnoman.com সার্ভারে সংযোগ',
+                        style: TextStyle(fontSize: 10, color: AppTheme.primaryColor, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
+
+    // Prepare API Request
+    final request = ConsultationRequest(
+      patientName: _nameController.text.trim(),
+      age: ageValue,
+      gender: _selectedGender,
+      weight: weightValue,
+      hasDiabetes: _hasDiabetes,
+      hasHypertension: _hasHypertension,
+      hasHeartDisease: _hasHeartDisease,
+      hasAsthma: _hasAsthma,
+      hasKidneyDisease: _hasKidneyDisease,
+      hasCancer: _hasCancer,
+      hasStroke: _hasStroke,
+      hasAllergy: _hasAllergy,
+      hasLiverCirrhosis: _hasLiverCirrhosis,
+      hasTb: _hasTb,
+      hasThyroidProblem: _hasThyroidProblem,
+      isSmoker: _isSmoker,
+      isAlcoholic: _isAlcoholic,
+      symptoms: symptomsList,
+      symptomDescription: symptomText,
+      durationDays: durationValue,
+    );
+
+    try {
+      final consultationResponse = await ConsultationApiService.createConsultation(request);
+
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+
+      // Also compute local fallback result for color/compatibility
+      final fallbackResult = TriageService.analyzeSymptoms(
+        symptomText,
+        age: ageValue,
+        gender: _selectedGender,
+        isSmoker: _isSmoker,
+        weight: weightValue,
+        hasDiabetes: _hasDiabetes,
+        hasHighBP: _hasHypertension,
+        hasHeartDisease: _hasHeartDisease,
+        hasAsthma: _hasAsthma,
+        hasKidneyDisease: _hasKidneyDisease,
+        hasCancer: _hasCancer,
+        hasStroke: _hasStroke,
+        hasAllergy: _hasAllergy,
+        hasLiverCirrhosis: _hasLiverCirrhosis,
+        hasTb: _hasTb,
+        hasThyroidProblem: _hasThyroidProblem,
+        isAlcoholic: _isAlcoholic,
+        durationDays: durationValue,
+      );
+
+      // Navigate to Result Screen with live API consultation response!
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ResultScreen(
+            result: fallbackResult,
+            consultation: consultationResponse,
+            patientName: _nameController.text.trim(),
+            symptoms: symptomText,
+            age: ageValue,
+            weight: weightValue,
+            durationDays: durationValue,
+            hasDiabetes: _hasDiabetes,
+            hasHighBP: _hasHypertension,
+            hasHeartDisease: _hasHeartDisease,
+            hasAsthma: _hasAsthma,
+            hasKidneyDisease: _hasKidneyDisease,
+            hasCancer: _hasCancer,
+            hasStroke: _hasStroke,
+            hasAllergy: _hasAllergy,
+            hasLiverCirrhosis: _hasLiverCirrhosis,
+            hasTb: _hasTb,
+            hasThyroidProblem: _hasThyroidProblem,
+            isSmoker: _isSmoker,
+            isAlcoholic: _isAlcoholic,
+            gender: _selectedGender,
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Consultation API call error: $e');
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+
+      // Show friendly fallback choice dialog
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.cloud_off, color: AppTheme.dangerColor),
+              SizedBox(width: 8),
+              Text('সার্ভার যোগাযোগে সমস্যা', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$e',
+                style: const TextStyle(fontSize: 13, color: AppTheme.textDark, height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'ইন্টারনেট সংযোগ না থাকলেও আপনি তাৎক্ষণিক অফলাইন ট্রায়াজ ফলাফল দেখতে পারেন।',
+                style: TextStyle(fontSize: 12, color: AppTheme.textLight, height: 1.4),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _submitTriage(); // Retry
+              },
+              child: const Text('আবার চেষ্টা করুন'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                // Proceed with local rule-based analysis
+                final fallbackResult = TriageService.analyzeSymptoms(
+                  symptomText,
+                  age: ageValue,
+                  gender: _selectedGender,
+                  isSmoker: _isSmoker,
+                  weight: weightValue,
+                  hasDiabetes: _hasDiabetes,
+                  hasHighBP: _hasHypertension,
+                  hasHeartDisease: _hasHeartDisease,
+                  hasAsthma: _hasAsthma,
+                  hasKidneyDisease: _hasKidneyDisease,
+                  hasCancer: _hasCancer,
+                  hasStroke: _hasStroke,
+                  hasAllergy: _hasAllergy,
+                  hasLiverCirrhosis: _hasLiverCirrhosis,
+                  hasTb: _hasTb,
+                  hasThyroidProblem: _hasThyroidProblem,
+                  isAlcoholic: _isAlcoholic,
+                  durationDays: durationValue,
+                );
+
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ResultScreen(
+                      result: fallbackResult,
+                      consultation: null,
+                      patientName: _nameController.text.trim(),
+                      symptoms: symptomText,
+                      age: ageValue,
+                      weight: weightValue,
+                      durationDays: durationValue,
+                      hasDiabetes: _hasDiabetes,
+                      hasHighBP: _hasHypertension,
+                      hasHeartDisease: _hasHeartDisease,
+                      hasAsthma: _hasAsthma,
+                      hasKidneyDisease: _hasKidneyDisease,
+                      hasCancer: _hasCancer,
+                      hasStroke: _hasStroke,
+                      hasAllergy: _hasAllergy,
+                      hasLiverCirrhosis: _hasLiverCirrhosis,
+                      hasTb: _hasTb,
+                      hasThyroidProblem: _hasThyroidProblem,
+                      isSmoker: _isSmoker,
+                      isAlcoholic: _isAlcoholic,
+                      gender: _selectedGender,
+                    ),
+                  ),
+                );
+              },
+              child: const Text('অফলাইন রেজাল্ট দেখুন'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _resetAllRisks() {
+    setState(() {
+      _hasDiabetes = false;
+      _hasHypertension = false;
+      _hasHeartDisease = false;
+      _hasAsthma = false;
+      _hasKidneyDisease = false;
+      _hasCancer = false;
+      _hasStroke = false;
+      _hasAllergy = false;
+      _hasLiverCirrhosis = false;
+      _hasTb = false;
+      _hasThyroidProblem = false;
+      _isSmoker = false;
+      _isAlcoholic = false;
+    });
   }
 
   @override
@@ -360,14 +643,14 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
             minHeight: 6,
           ),
           const SizedBox(height: 10),
-          
+
           // Steps Tracker Header
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildStepHeader(0, '১. রোগী পরিচিতি', active: _currentStep == 0),
+                _buildStepHeader(0, '১. রোগী ও স্বাস্থ্য তথ্য', active: _currentStep == 0),
                 _buildStepHeader(1, '২. কথা বলুন', active: _currentStep == 1),
                 _buildStepHeader(2, '৩. নিশ্চিত করুন', active: _currentStep == 2),
               ],
@@ -393,7 +676,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
                   blurRadius: 10,
                   offset: const Offset(0, -4),
                 )
-              ]
+              ],
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -482,7 +765,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
     }
   }
 
-  // --- STEP 1: USER PROFILE ---
+  // --- STEP 1: USER PROFILE & MEDICAL HISTORY ---
   Widget _buildProfileStep() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -495,7 +778,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
         TextField(
           controller: _nameController,
           decoration: InputDecoration(
-            hintText: 'উদাঃ রহিম মিয়া',
+            hintText: 'উদাঃ করিম সাহেব',
             filled: true,
             fillColor: AppTheme.accentColor,
             border: OutlineInputBorder(
@@ -521,8 +804,8 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
           style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
         ),
         const SizedBox(height: 10),
-        
-        // Premium Age Selector Widget
+
+        // Age Selector Widget
         Container(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
           decoration: BoxDecoration(
@@ -533,7 +816,6 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Minus Button Card
               Material(
                 color: AppTheme.primaryColor,
                 shape: const CircleBorder(),
@@ -549,17 +831,11 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
                   customBorder: const CircleBorder(),
                   child: Container(
                     padding: const EdgeInsets.all(12),
-                    child: const Icon(
-                      Icons.remove,
-                      color: Colors.white,
-                      size: 24,
-                    ),
+                    child: const Icon(Icons.remove, color: Colors.white, size: 24),
                   ),
                 ),
               ),
               const SizedBox(width: 25),
-              
-              // Age Text Field Container
               Container(
                 width: 90,
                 decoration: BoxDecoration(
@@ -586,8 +862,6 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
                 ),
               ),
               const SizedBox(width: 25),
-              
-              // Plus Button Card
               Material(
                 color: AppTheme.primaryColor,
                 shape: const CircleBorder(),
@@ -603,11 +877,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
                   customBorder: const CircleBorder(),
                   child: Container(
                     padding: const EdgeInsets.all(12),
-                    child: const Icon(
-                      Icons.add,
-                      color: Colors.white,
-                      size: 24,
-                    ),
+                    child: const Icon(Icons.add, color: Colors.white, size: 24),
                   ),
                 ),
               ),
@@ -615,12 +885,12 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        
+
         // Age presets
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
-            children: [5, 12, 25, 45, 65, 80].map((age) {
+            children: [5, 12, 25, 45, 52, 65, 80].map((age) {
               return Padding(
                 padding: const EdgeInsets.only(right: 8.0),
                 child: ChoiceChip(
@@ -645,36 +915,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
         ),
         const SizedBox(height: 25),
 
-        const Text(
-          'রোগীর ওজন কত? (কেজি - ঐচ্ছিক)',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _weightController,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            hintText: 'উদাঃ ৬০ (কেজি)',
-            filled: true,
-            fillColor: AppTheme.accentColor,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: AppTheme.primaryColor.withOpacity(0.15), width: 1),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: AppTheme.primaryColor.withOpacity(0.15), width: 1),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppTheme.primaryColor, width: 1.5),
-            ),
-            prefixIcon: const Icon(Icons.monitor_weight_outlined, color: AppTheme.primaryColor),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          ),
-        ),
-        const SizedBox(height: 25),
-
+        // Gender Selector
         const Text(
           'জেন্ডার সিলেক্ট করুন',
           style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
@@ -715,7 +956,138 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
         ),
         const SizedBox(height: 25),
 
-        // Health Conditions and Habits Card
+        // Weight Field
+        const Text(
+          'রোগীর ওজন কত? (কেজি - ঐচ্ছিক)',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _weightController,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            hintText: 'উদাঃ ৭২ (কেজি)',
+            filled: true,
+            fillColor: AppTheme.accentColor,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.primaryColor.withOpacity(0.15), width: 1),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.primaryColor.withOpacity(0.15), width: 1),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppTheme.primaryColor, width: 1.5),
+            ),
+            prefixIcon: const Icon(Icons.monitor_weight_outlined, color: AppTheme.primaryColor),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          ),
+        ),
+        const SizedBox(height: 25),
+
+        // Duration in Days Section (NEW: Duration Days)
+        const Text(
+          'লক্ষণ শুরুর সময়কাল / কত দিন ধরে লক্ষণ? (দিন)',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: AppTheme.borderRadius,
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.calendar_month_outlined, color: AppTheme.primaryColor, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'অসুস্থতার স্থায়িত্ব: $_durationDays দিন',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                        ),
+                        const Text(
+                          'লক্ষণ কত দিন ধরে চলছে তা ঝুঁকি মূল্যায়নে অত্যন্ত গুরুত্বপূর্ণ',
+                          style: TextStyle(fontSize: 11, color: AppTheme.textLight),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [1, 2, 3, 5, 7, 10, 14, 30].map((days) {
+                    final isSel = _durationDays == days;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: ChoiceChip(
+                        label: Text('$days দিন'),
+                        selected: isSel,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setState(() {
+                              _durationDays = days;
+                              _durationController.text = days.toString();
+                            });
+                          }
+                        },
+                        selectedColor: AppTheme.primaryColor.withOpacity(0.15),
+                        backgroundColor: Colors.grey.shade100,
+                        checkmarkColor: AppTheme.primaryColor,
+                        labelStyle: TextStyle(
+                          color: isSel ? AppTheme.primaryColor : AppTheme.textDark,
+                          fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                          fontSize: 12,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 25),
+
+        // Health Conditions & Risk Factors Card Header
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'পূর্ববর্তী রোগ ও স্বাস্থ্য ঝুঁকি',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                ),
+                Text(
+                  'প্রযোজ্য ক্ষেত্রে টিক/সুইচ অন করুন',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textLight),
+                ),
+              ],
+            ),
+            TextButton.icon(
+              onPressed: _resetAllRisks,
+              icon: const Icon(Icons.clear_all, size: 16),
+              label: const Text('সব "না"', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // 1. Major Chronic Conditions Card
         Card(
           elevation: 0,
           color: Colors.white,
@@ -724,106 +1096,250 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
             borderRadius: AppTheme.borderRadius,
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Smoker row
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.smoking_rooms, color: AppTheme.primaryColor),
-                        SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'ধূমপান করেন?',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                            ),
-                            Text(
-                              'ধূমপায়ী হলে কাশির ঝুঁকি বাড়ে',
-                              style: TextStyle(fontSize: 11, color: AppTheme.textLight),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Switch(
-                      value: _isSmoker,
-                      onChanged: (val) => setState(() => _isSmoker = val),
-                      activeThumbColor: AppTheme.primaryColor,
-                    ),
-                  ],
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.healing, color: AppTheme.primaryColor, size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'দীর্ঘমেয়াদী ও প্রধান রোগসমূহ',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryColor),
+                      ),
+                    ],
+                  ),
                 ),
-                const Divider(height: 20),
-                // Diabetes row
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.bloodtype_outlined, color: AppTheme.primaryColor),
-                        SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'ডায়াবেটিস আছে?',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                            ),
-                            Text(
-                              'রক্তে চিনির মাত্রা বেশি',
-                              style: TextStyle(fontSize: 11, color: AppTheme.textLight),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Switch(
-                      value: _hasDiabetes,
-                      onChanged: (val) => setState(() => _hasDiabetes = val),
-                      activeThumbColor: AppTheme.primaryColor,
-                    ),
-                  ],
+                const Divider(height: 10),
+                _buildRiskSwitch(
+                  title: 'ডায়াবেটিস (Diabetes)',
+                  subtitle: 'রক্তে চিনির মাত্রা বেশি বা ইনসুলিন গ্রহণ করেন',
+                  icon: Icons.bloodtype_outlined,
+                  value: _hasDiabetes,
+                  onChanged: (val) => setState(() => _hasDiabetes = val),
                 ),
-                const Divider(height: 20),
-                // High BP row
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.favorite_border, color: AppTheme.primaryColor),
-                        SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'উচ্চ রক্তচাপ (হাই প্রেসার)?',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                            ),
-                            Text(
-                              'রক্তের চাপ স্বাভাবিকের চেয়ে বেশি',
-                              style: TextStyle(fontSize: 11, color: AppTheme.textLight),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Switch(
-                      value: _hasHighBP,
-                      onChanged: (val) => setState(() => _hasHighBP = val),
-                      activeThumbColor: AppTheme.primaryColor,
-                    ),
-                  ],
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'উচ্চ রক্তচাপ (Hypertension / High BP)',
+                  subtitle: 'হাই প্রেসারের ওষুধ খান বা প্রেসার বেশি থাকে',
+                  icon: Icons.favorite_border,
+                  value: _hasHypertension,
+                  onChanged: (val) => setState(() => _hasHypertension = val),
+                ),
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'হৃদরোগ (Heart Disease)',
+                  subtitle: 'হার্টের সমস্যা, ব্লক বা পূর্বে হার্ট অ্যাটাকের ইতিহাস',
+                  icon: Icons.monitor_heart_outlined,
+                  value: _hasHeartDisease,
+                  onChanged: (val) => setState(() => _hasHeartDisease = val),
+                ),
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'হাঁপানি / অ্যাজমা (Asthma)',
+                  subtitle: 'শ্বাসকষ্টের টান বা ইনহেলার ব্যবহার করতে হয়',
+                  icon: Icons.air,
+                  value: _hasAsthma,
+                  onChanged: (val) => setState(() => _hasAsthma = val),
+                ),
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'কিডনি রোগ (Kidney Disease)',
+                  subtitle: 'কিডনি সমস্যা বা ক্রিয়েটিনিন বেশি',
+                  icon: Icons.water_drop_outlined,
+                  value: _hasKidneyDisease,
+                  onChanged: (val) => setState(() => _hasKidneyDisease = val),
                 ),
               ],
             ),
           ),
         ),
+        const SizedBox(height: 16),
+
+        // 2. Other Health Risks Card
+        Card(
+          elevation: 0,
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: Colors.grey.shade200, width: 1),
+            borderRadius: AppTheme.borderRadius,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.medical_services_outlined, color: AppTheme.secondaryColor, size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'অন্যান্য স্বাস্থ্য জটিলতা',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.secondaryColor),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 10),
+                _buildRiskSwitch(
+                  title: 'ব্রেন স্ট্রোক (Stroke)',
+                  subtitle: 'পূর্বে শরীরের একপাশ অবশ বা স্ট্রোকের ইতিহাস',
+                  icon: Icons.psychology_outlined,
+                  value: _hasStroke,
+                  onChanged: (val) => setState(() => _hasStroke = val),
+                ),
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'অ্যালার্জি (Allergy)',
+                  subtitle: 'ওষুধ, খাবার বা ধুলাবালিতে তীব্র অ্যালার্জি',
+                  icon: Icons.coronavirus_outlined,
+                  value: _hasAllergy,
+                  onChanged: (val) => setState(() => _hasAllergy = val),
+                ),
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'থাইরয়েড সমস্যা (Thyroid Problem)',
+                  subtitle: 'থাইরয়েডের হরমোনের তারতম্য বা ওষুধ সেবন',
+                  icon: Icons.healing_outlined,
+                  value: _hasThyroidProblem,
+                  onChanged: (val) => setState(() => _hasThyroidProblem = val),
+                ),
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'ক্যান্সার (Cancer)',
+                  subtitle: 'ক্যান্সার বা টিউমারের ইতিহাস বা চিকিৎসা চলছে',
+                  icon: Icons.shield_outlined,
+                  value: _hasCancer,
+                  onChanged: (val) => setState(() => _hasCancer = val),
+                ),
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'লিভার সিরোসিস (Liver Cirrhosis)',
+                  subtitle: 'লিভারের দীর্ঘমেয়াদী জটিলতা বা ফ্যাটি লিভার',
+                  icon: Icons.local_hospital_outlined,
+                  value: _hasLiverCirrhosis,
+                  onChanged: (val) => setState(() => _hasLiverCirrhosis = val),
+                ),
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'যক্ষ্মা / টিবি (Tuberculosis / TB)',
+                  subtitle: 'পূর্বে যক্ষ্মার চিকিৎসা নিয়েছেন বা আক্রান্ত',
+                  icon: Icons.sick_outlined,
+                  value: _hasTb,
+                  onChanged: (val) => setState(() => _hasTb = val),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // 3. Lifestyle & Habits Card
+        Card(
+          elevation: 0,
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: Colors.grey.shade200, width: 1),
+            borderRadius: AppTheme.borderRadius,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_outline, color: AppTheme.warningColor, size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'জীবনযাপন ও অভ্যাস',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.warningColor),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 10),
+                _buildRiskSwitch(
+                  title: 'ধূমপান করেন? (Smoker)',
+                  subtitle: 'সিগারেট, বিড়ি বা তামাক সেবনের অভ্যাস আছে',
+                  icon: Icons.smoking_rooms,
+                  value: _isSmoker,
+                  onChanged: (val) => setState(() => _isSmoker = val),
+                ),
+                const Divider(height: 1),
+                _buildRiskSwitch(
+                  title: 'মদ্যপান করেন? (Alcoholic)',
+                  subtitle: 'অ্যালকোহল বা মদ্যপানের অভ্যাস রয়েছে',
+                  icon: Icons.local_bar_outlined,
+                  value: _isAlcoholic,
+                  onChanged: (val) => setState(() => _isAlcoholic = val),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
       ],
+    );
+  }
+
+  Widget _buildRiskSwitch({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  color: value ? AppTheme.primaryColor : Colors.grey.shade500,
+                  size: 22,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight: value ? FontWeight.bold : FontWeight.w600,
+                          fontSize: 13,
+                          color: value ? AppTheme.primaryColor : AppTheme.textDark,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(fontSize: 11, color: AppTheme.textLight),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeThumbColor: AppTheme.primaryColor,
+          ),
+        ],
+      ),
     );
   }
 
@@ -981,7 +1497,8 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
             Expanded(child: Divider()),
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 10),
-              child: Text('অথবা নমুনা লক্ষণ নির্বাচন করুন (Demo)', style: TextStyle(fontSize: 11, color: AppTheme.textLight)),
+              child: Text('অথবা নমুনা লক্ষণ নির্বাচন করুন (Demo)',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textLight)),
             ),
             Expanded(child: Divider()),
           ],
@@ -1004,13 +1521,16 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
               ),
               child: ListTile(
                 leading: Text(item['icon']!, style: const TextStyle(fontSize: 24)),
-                title: Text(item['label']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
-                subtitle: Text(item['text']!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                title: Text(item['label']!,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
+                subtitle: Text(item['text']!,
+                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 14),
                 onTap: () {
                   setState(() {
+                    _selectedPresetLabel = item['label']!;
                     _symptomController.text = item['text']!;
-                    _currentStep = 2; // Forward to verification
+                    _currentStep = 2; // Forward to review
                   });
                 },
               ),
@@ -1023,6 +1543,21 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
 
   // --- STEP 3: CONFIRM & SUBMIT ---
   Widget _buildReviewStep() {
+    final activeRisks = <String>[];
+    if (_hasDiabetes) activeRisks.add('ডায়াবেটিস');
+    if (_hasHypertension) activeRisks.add('উচ্চ রক্তচাপ');
+    if (_hasHeartDisease) activeRisks.add('হৃদরোগ');
+    if (_hasAsthma) activeRisks.add('হাঁপানি/অ্যাজমা');
+    if (_hasKidneyDisease) activeRisks.add('কিডনি রোগ');
+    if (_hasStroke) activeRisks.add('স্ট্রোক');
+    if (_hasCancer) activeRisks.add('ক্যান্সার');
+    if (_hasAllergy) activeRisks.add('অ্যালার্জি');
+    if (_hasThyroidProblem) activeRisks.add('থাইরয়েড');
+    if (_hasLiverCirrhosis) activeRisks.add('লিভার সিরোসিস');
+    if (_hasTb) activeRisks.add('যক্ষ্মা (TB)');
+    if (_isSmoker) activeRisks.add('ধূমপায়ী');
+    if (_isAlcoholic) activeRisks.add('মদ্যপান');
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1068,7 +1603,7 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'রোগীর প্রোফাইল সংক্ষেপ:',
+                  'রোগীর প্রোফাইল ও ঝুঁকির সংক্ষেপ:',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryColor),
                 ),
                 const SizedBox(height: 8),
@@ -1078,12 +1613,16 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
                   children: [
                     _buildSummaryBadge('নাম: ${_nameController.text.trim()}'),
                     _buildSummaryBadge('বয়স: ${_ageController.text} বছর'),
+                    _buildSummaryBadge('স্থায়িত্ব: $_durationDays দিন'),
                     if (_weightController.text.trim().isNotEmpty)
                       _buildSummaryBadge('ওজন: ${_weightController.text.trim()} কেজি'),
-                    _buildSummaryBadge('লিঙ্গ: ${_selectedGender == 'male' ? 'পুরুষ' : _selectedGender == 'female' ? 'নারী' : 'গর্ভবতী'}'),
-                    _buildSummaryBadge('ধূমপায়ী: ${_isSmoker ? 'হ্যাঁ' : 'না'}'),
-                    _buildSummaryBadge('ডায়াবেটিস: ${_hasDiabetes ? 'হ্যাঁ' : 'না'}'),
-                    _buildSummaryBadge('উচ্চ রক্তচাপ: ${_hasHighBP ? 'হ্যাঁ' : 'না'}'),
+                    _buildSummaryBadge(
+                      'লিঙ্গ: ${_selectedGender == 'male' ? 'পুরুষ' : _selectedGender == 'female' ? 'নারী' : 'গর্ভবতী'}',
+                    ),
+                    if (activeRisks.isEmpty)
+                      _buildSummaryBadge('পূর্ববর্তী রোগ: কোনোটিই নয়')
+                    else
+                      ...activeRisks.map((risk) => _buildSummaryBadge(risk, isAlert: true)),
                   ],
                 ),
               ],
@@ -1094,17 +1633,23 @@ class _TriageWizardScreenState extends State<TriageWizardScreen> {
     );
   }
 
-  Widget _buildSummaryBadge(String label) {
+  Widget _buildSummaryBadge(String label, {bool isAlert = false}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isAlert ? AppTheme.primaryColor.withOpacity(0.12) : Colors.white,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.primaryColor.withOpacity(0.15)),
+        border: Border.all(
+          color: isAlert ? AppTheme.primaryColor.withOpacity(0.4) : AppTheme.primaryColor.withOpacity(0.15),
+        ),
       ),
       child: Text(
         label,
-        style: const TextStyle(fontSize: 11, color: AppTheme.textDark, fontWeight: FontWeight.w500),
+        style: TextStyle(
+          fontSize: 11,
+          color: isAlert ? AppTheme.primaryColor : AppTheme.textDark,
+          fontWeight: isAlert ? FontWeight.bold : FontWeight.w500,
+        ),
       ),
     );
   }

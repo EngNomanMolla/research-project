@@ -8,7 +8,6 @@ class RecordsDbService {
   
   // In-memory cache for instant synchronous access and reliability
   static final List<PatientRecord> _memoryCache = [];
-  static bool _hasLoadedFromDisk = false;
 
   /// Saves a new patient triage record to local storage.
   static Future<bool> saveRecord(PatientRecord record) async {
@@ -62,7 +61,6 @@ class RecordsDbService {
           _memoryCache.add(diskRecord);
         }
       }
-      _hasLoadedFromDisk = true;
       
       // Sort by creation date descending
       _memoryCache.sort((a, b) => b.createdAt.compareTo(a.createdAt));

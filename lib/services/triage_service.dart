@@ -32,6 +32,17 @@ class TriageService {
     required double? weight,
     required bool hasDiabetes,
     required bool hasHighBP,
+    bool hasHeartDisease = false,
+    bool hasAsthma = false,
+    bool hasKidneyDisease = false,
+    bool hasCancer = false,
+    bool hasStroke = false,
+    bool hasAllergy = false,
+    bool hasLiverCirrhosis = false,
+    bool hasTb = false,
+    bool hasThyroidProblem = false,
+    bool isAlcoholic = false,
+    int durationDays = 2,
   }) {
     final text = symptomText.toLowerCase();
 

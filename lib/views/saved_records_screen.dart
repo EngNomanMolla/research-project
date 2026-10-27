@@ -300,14 +300,37 @@ class _SavedRecordsScreenState extends State<SavedRecordsScreen> {
                 children: [
                   _buildMiniChip('${record.age} বছর', Icons.calendar_today),
                   _buildMiniChip(record.genderDisplayBn, Icons.person),
+                  _buildMiniChip('${record.durationDays} দিন', Icons.timer_outlined),
                   if (record.weight != null)
                     _buildMiniChip('${record.weight} কেজি', Icons.monitor_weight),
+                  if (record.trackingCode != null && record.trackingCode!.isNotEmpty)
+                    _buildMiniChip(record.trackingCode!, Icons.verified, color: AppTheme.primaryColor),
                   if (record.hasDiabetes)
                     _buildMiniChip('ডায়াবেটিস', Icons.bloodtype, color: AppTheme.dangerColor),
                   if (record.hasHighBP)
                     _buildMiniChip('উচ্চ রক্তচাপ', Icons.favorite, color: AppTheme.dangerColor),
+                  if (record.hasHeartDisease)
+                    _buildMiniChip('হৃদরোগ', Icons.monitor_heart, color: AppTheme.dangerColor),
+                  if (record.hasAsthma)
+                    _buildMiniChip('হাঁপানি', Icons.air, color: AppTheme.warningColor),
+                  if (record.hasKidneyDisease)
+                    _buildMiniChip('কিডনি', Icons.water_drop, color: AppTheme.warningColor),
+                  if (record.hasStroke)
+                    _buildMiniChip('স্ট্রোক', Icons.psychology, color: AppTheme.dangerColor),
+                  if (record.hasCancer)
+                    _buildMiniChip('ক্যান্সার', Icons.medical_services, color: AppTheme.dangerColor),
+                  if (record.hasAllergy)
+                    _buildMiniChip('অ্যালার্জি', Icons.coronavirus, color: AppTheme.warningColor),
+                  if (record.hasThyroidProblem)
+                    _buildMiniChip('থাইরয়েড', Icons.healing, color: AppTheme.warningColor),
+                  if (record.hasLiverCirrhosis)
+                    _buildMiniChip('লিভার', Icons.local_hospital, color: AppTheme.dangerColor),
+                  if (record.hasTb)
+                    _buildMiniChip('যক্ষ্মা', Icons.sick, color: AppTheme.dangerColor),
                   if (record.isSmoker)
                     _buildMiniChip('ধূমপায়ী', Icons.smoking_rooms, color: AppTheme.warningColor),
+                  if (record.isAlcoholic)
+                    _buildMiniChip('মদ্যপান', Icons.local_bar, color: AppTheme.warningColor),
                 ],
               ),
               const SizedBox(height: 10),
